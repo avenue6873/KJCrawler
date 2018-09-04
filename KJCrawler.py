@@ -1,16 +1,25 @@
 import requests
 from bs4 import BeautifulSoup
 
-req = requests.get("https://www.jobaba.net/fntn/dtl.do?seq=5153")
+rootAdres = "https://www.bucheon.go.kr/site/program/board/basicboard/"
+req = requests.get("https://www.bucheon.go.kr/site/program/board/basicboard/list?boardtypeid=26736&menuid=148004001001")
 allHtml = req.content
 
-html = BeautifulSoup(allHtml, "html.parser")
+html = BeautifulSoup(allHtml, 'html.parser')
 
-p = html.find("p", {"class":"alam-area"})
-div = html.find("div", {"class":"data-sec01"})
+sj_list = html.select('tbody > tr > .td-lf > a')
 
-subject = p.text
-content = div.text
+for row in sj_list:
+    # 링크변환
+    transLink = rootAdres + row.get('href').replace("./", "")
 
-print("제목1 : " + subject)
-print("내용 : " + content)
+    conReq = requests.get(transLink)
+
+    conHtml = conReq.content
+
+    contentHtml = BeautifulSoup(conHtml, 'html.parser')
+
+    content = contentHtml.select_one(".board-cons").text
+
+    print("[제목] : " + row.text.strip() + "\n[링크] : " + row.get('href').strip()+"\n[변환링크] : " + transLink + "\n[내용] : " + content + "\n\n")
+
