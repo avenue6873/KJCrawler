@@ -1,12 +1,26 @@
 # -*- coding: utf-8 -*-
+from selenium import webdriver
 import requests
 from bs4 import BeautifulSoup
 import pymysql
+from datetime import datetime
+
+# 현재날짜구해서 변수에 대입 YYYYmmdd 형태의 시간 출력
+v_today = datetime.today().strftime("%Y%m%d")
+
+# ChromeDriver Headless 모드 설정
+options = webdriver.ChromeOptions()
+options.add_argument('headless')
+options.add_argument('1920x1080')
+options.add_argument("--disable-gpu")
+
+# 윈도우용 ChromeDriver Load
+driver = webdriver.Chrome('C:\chromedriver\chromedriver.exe', chrome_options=options)
 
 # 유동적인 변수는 postfix v_로 구분
 
 # MySQL Connection 연결
-conn = pymysql.connect(host='kungjjak.cafe24.com', user='kungjjak', password='tkfkdgo0812^^', db='kungjjak', charset='utf8')
+conn = pymysql.connect(host='kungjjak.cafe24.com', user='kungjjak', password='tkfkdgo0812^^', db='kjcrawler', charset='utf8')
 
 # MySQL Connection 후 Cursor 생성
 curs = conn.cursor(pymysql.cursors.DictCursor)
@@ -14,18 +28,20 @@ curs = conn.cursor(pymysql.cursors.DictCursor)
 # 쿼리 변수 대입
 sql = "SELECT " \
           "COLCT_TRGET_ID, " \
-          "INSTT_NM, " \
-          "BBS_NM, " \
-          "BASS_ADRES, " \
-          "BBS_LIST_ADRES, " \
-          "LIST_SELECTOR, " \
-          "CONTENT_SELECTOR, " \
-          "NOTICE_AT, " \
-          "SUBJECT_LOC, " \
-          "REGIST_DE_LOC, " \
-          "CREAT_PNTTM, " \
-          "UPDT_PNTTM " \
-      "FROM TB_CRAWLER_TRGET"
+          "COLCT_INSTT_NM, " \
+          "COLCT_BBS_NM, " \
+          "COLCT_BBS_ADRES, " \
+          "SUBJECT_XPATH, " \
+          "CONTENT_XPATH, " \
+          "REGIST_DE_XPATH, " \
+          "SUBJECT_TR_LOC, " \
+          "SUBJECT_TD_LOC," \
+          "CONTENT_TR_LOC," \
+          "CONTENT_TD_LOC," \
+          "LIST_CNT," \
+          "LAST_COLCT_DE," \
+          "CREAT_PNTTM " \
+      "FROM kjcrawler_web_trget"
 
 # CURSOR에 쿼리 적재
 curs.execute("set names utf8")
@@ -38,60 +54,51 @@ return_query = curs.fetchall()
 for row in return_query:
     # 결과 값을 해당 변수에 저장
     v_colct_trget_id = row['COLCT_TRGET_ID'] # 수집대상ID
-    v_instt_nm = row['INSTT_NM'] # 기관명
-    v_bbs_nm = row['BBS_NM'] # 게시판명
-    v_bass_adres = row['BASS_ADRES'] # 기본주소
-    v_bbs_list_adres = row['BBS_LIST_ADRES'] # 게시판목록주소
-    v_list_selector = row['LIST_SELECTOR'] # 목록셀렉터
-    v_content_selector = row['CONTENT_SELECTOR'] # 내용셀렉터
-    v_notice_at = row['NOTICE_AT'] # 공지사항여부
-    v_subject_loc = row['SUBJECT_LOC'] # 제목위치
-    v_regist_de_loc = row['REGIST_DE_LOC'] # 등록일자위치
+    v_colct_instt_nm = row['COLCT_INSTT_NM'] # 수집기관명
+    v_colct_bbs_nm = row['COLCT_BBS_NM'] # 수집게시판명
+    v_colct_bbs_adres = row['COLCT_BBS_ADRES'] # 수집게시판주소
+    v_subject_xpath = row['SUBJECT_XPATH'] # 제목XPATH
+    v_content_xpath = row['CONTENT_XPATH'] # 내용XPATH
+    v_regist_de_xpath = row['REGIST_DE_XPATH'] # 등록일자XPATH
+    v_subject_tr_loc = row['SUBJECT_TR_LOC'] # 제목행위치
+    v_subject_td_loc = row['SUBJECT_TD_LOC'] # 제목열위치
+    v_content_tr_loc = row['CONTENT_TR_LOC'] # 내용행위치
+    v_content_td_loc = row['CONTENT_TD_LOC'] # 내용열위치
+    v_list_cnt = row['LIST_CNT']  # 게시물갯수
+    v_last_colct_de = row['LAST_COLCT_DE'] # 최종등록일자
     v_creat_pnttm = row['CREAT_PNTTM'] # 등록일자
-    v_updt_pnttm = row['UPDT_PNTTM'] # 수정일자
 
-    # requests 객체에 url 세팅
-    v_request = requests.get(v_bbs_list_adres)
+    for list_cnt in range(int(v_subject_tr_loc), int(v_list_cnt)+1, 1):
+        # DB에서 가져온 XPATH 값을 게시물 수 만큼 동적 변경
+        v_trans_subject_xpath = v_subject_xpath.replace("trn", str(list_cnt)).replace("tdn", v_subject_td_loc)
 
-    # 해당 url의 html을 가져옴
-    v_bbs_list_html = v_request.content
+        # chromedriver 2초 대기
+        driver.implicitly_wait(1)
 
-    # 가져온 html 파싱
-    v_parse_html = BeautifulSoup(v_bbs_list_html, 'html.parser')
+        # 수집대상 게시판 목록 url 대입하여 driver 오픈
+        driver.get(v_colct_bbs_adres)
 
-    # 파싱한 html에서 셀렉터를 이용하여 게시물 목록만 리스트로 추출
-    v_get_list = v_parse_html.select(v_list_selector)
+        # 제목 추출하여 변수에 담음
+        v_crawling_subject = driver.find_element_by_xpath(v_trans_subject_xpath).text
 
-    # 게시물 목록을 반복문을 통해 순차적으로 추출
-    for row_data in v_get_list:
-        # 공지사항여부가 N일 경우 그대로 목록 추출
-        if v_notice_at == 'N' :
-            # 게시물의 제목, 상세링크주소, 등록일자를 가져옴(이때 제목위치, 등록일자위치는 int형으로 형변환)
-            v_subject = row_data.select('td')[int(v_subject_loc)].text
-            v_detail_adres = row_data.find('a').get('href').replace('./', '')
-            v_regist_de = row_data.select('td')[int(v_regist_de_loc)].text.replace('-','')
+        # 상세페이지 이동
+        driver.find_element_by_xpath(v_trans_subject_xpath).click()
 
-            # 상세화면 주소 조합
-            v_trans_detail_adres = v_bass_adres + v_detail_adres
+        # 등록일자 추출하여 변수에 담음
+        v_crawling_regist_de = driver.find_element_by_xpath(v_regist_de_xpath).text.replace("-", "").replace("/", "")
 
-            # 상세내용 requests 객체 url 세팅
-            v_detail_request = requests.get(v_trans_detail_adres)
+        # 내용xpath 변수 및 내용 변수 선언
+        v_crawling_content = ""
+        v_trans_content_xpath = ""
 
-            # 상세내용 url의 html을 가져옴
-            v_detail_content = v_detail_request.content
+        # 내용 추출하여 변수에 담음 (td 값 존재에 따라 xpath가 달라지므로 if문 사용)
+        if v_content_td_loc == 'X':
+            v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc)
+            v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
+        else:
+            v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc).replace("tdn", v_content_td_loc)
+            v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
 
-            # 가져온 상세내용 html 파싱
-            v_detail_parse_html = BeautifulSoup(v_detail_content, 'html.parser')
+        print("제목 : " + v_crawling_subject + ", 등록일자 : " + v_crawling_regist_de + ", 내용 : " + v_crawling_content)
 
-            # 파싱한 상세내용 html에서 셀렉터를 이용하여 상세내용의 텍스트만 추출
-            v_get_content = v_detail_parse_html.select_one(v_content_selector).text
-
-            print(v_colct_trget_id, v_subject, v_get_content, v_regist_de)
-
-            # 가져온 데이터 MySQL DB에 저장
-            curs.execute('INSERT INTO TB_CRAWLER_INFO (COLCT_TRGET_ID, SUBJECT, CONTENT, BBS_REGIST_DE, UPDT_PNTTM) VALUES (%s, %s, %s, %s, now())', (v_colct_trget_id, v_subject, v_get_content, v_regist_de))
-
-            conn.commit()
-
-# Connection 종료
-conn.close()
+#driver.quit()
