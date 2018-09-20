@@ -99,6 +99,15 @@ for row in return_query:
             v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc).replace("tdn", v_content_td_loc)
             v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
 
+
+        curs.execute('INSERT INTO kjcrawler_web_data (COLCT_TRGET_ID, COLCT_DATA_SUBJECT, COLCT_DATA_CONTENT, '
+                     'COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, now())', (v_colct_trget_id,
+                                                                                           v_crawling_subject,
+                                                                                           v_crawling_content,
+                                                                                           v_crawling_regist_de))
+
+        conn.commit()
+
         print("제목 : " + v_crawling_subject + ", 등록일자 : " + v_crawling_regist_de + ", 내용 : " + v_crawling_content)
 
-#driver.quit()
+driver.quit()
