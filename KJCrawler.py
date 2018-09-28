@@ -39,7 +39,7 @@ sql = "SELECT " \
           "CONTENT_TR_LOC," \
           "CONTENT_TD_LOC," \
           "LIST_CNT," \
-          "LAST_COLCT_DE," \
+          "IF(LAST_COLCT_DE = '', '00000000', LAST_COLCT_DE) AS LAST_COLCT_DE," \
           "CREAT_PNTTM " \
       "FROM kjcrawler_web_trget"
 
@@ -67,6 +67,7 @@ for row in return_query:
     v_list_cnt = row['LIST_CNT']  # 게시물갯수
     v_last_colct_de = row['LAST_COLCT_DE'] # 최종등록일자
     v_creat_pnttm = row['CREAT_PNTTM'] # 등록일자
+    v_bbs_link_url = '' # 게시물 링크 URL
 
     for list_cnt in range(int(v_subject_tr_loc), int(v_list_cnt)+1, 1):
         # DB에서 가져온 XPATH 값을 게시물 수 만큼 동적 변경
@@ -87,27 +88,37 @@ for row in return_query:
         # 등록일자 추출하여 변수에 담음
         v_crawling_regist_de = driver.find_element_by_xpath(v_regist_de_xpath).text.replace("-", "").replace("/", "")
 
-        # 내용xpath 변수 및 내용 변수 선언
-        v_crawling_content = ""
-        v_trans_content_xpath = ""
+        # 수집하려는 데이터의 등록일자가 최종수집일자와 같거나 더 클 경우에만 수집하기 위함.
+        if v_crawling_regist_de >= v_last_colct_de:
 
-        # 내용 추출하여 변수에 담음 (td 값 존재에 따라 xpath가 달라지므로 if문 사용)
-        if v_content_td_loc == 'X':
-            v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc)
-            v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
-        else:
-            v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc).replace("tdn", v_content_td_loc)
-            v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
+            # 현재 게시물의 주소를 변수에 담음
+            v_colct_link_adres = driver.current_url
 
+            # 내용xpath 변수 및 내용 변수 선언
+            v_crawling_content = ""
+            v_trans_content_xpath = ""
 
-        curs.execute('INSERT INTO kjcrawler_web_data (COLCT_TRGET_ID, COLCT_DATA_SUBJECT, COLCT_DATA_CONTENT, '
-                     'COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, now())', (v_colct_trget_id,
-                                                                                           v_crawling_subject,
-                                                                                           v_crawling_content,
-                                                                                           v_crawling_regist_de))
+            # 내용 추출하여 변수에 담음 (td 값 존재에 따라 xpath가 달라지므로 if문 사용)
+            if v_content_td_loc == 'X':
+                v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc)
+                v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
+            else:
+                v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc).replace("tdn", v_content_td_loc)
+                v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
 
-        conn.commit()
+            # 수집데이터 테이블에 데이터 INSERT
+            curs.execute('INSERT INTO kjcrawler_web_data (COLCT_TRGET_ID, COLCT_DATA_SUBJECT, COLCT_DATA_CONTENT, '
+                         'COLCT_LINK_ADRES, COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, %s, now())', (v_colct_trget_id,
+                                                                                               v_crawling_subject,
+                                                                                               v_crawling_content,
+                                                                                               v_colct_link_adres,
+                                                                                               v_crawling_regist_de))
 
-        print("제목 : " + v_crawling_subject + ", 등록일자 : " + v_crawling_regist_de + ", 내용 : " + v_crawling_content)
+            # 대상정보 테이블에 최종수집일자 업데이트
+            curs.execute('UPDATE kjcrawler_web_trget SET LAST_COLCT_DE = %s WHERE COLCT_TRGET_ID = %s', (v_today, v_colct_trget_id))
+
+            conn.commit()
+
+            print("제목 : " + v_crawling_subject + ", 등록일자 : " + v_crawling_regist_de + ", 내용 : " + v_crawling_content + ", 링크주소 : " + v_colct_link_adres)
 
 driver.quit()
