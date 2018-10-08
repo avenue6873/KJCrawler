@@ -31,17 +31,16 @@ sql = "SELECT " \
           "COLCT_INSTT_NM, " \
           "COLCT_BBS_NM, " \
           "COLCT_BBS_ADRES, " \
-          "SUBJECT_XPATH, " \
+          "LIST_SUBJECT_XPATH, " \
+          "DETAIL_SUBJECT_XPATH, " \
           "CONTENT_XPATH, " \
           "REGIST_DE_XPATH, " \
-          "SUBJECT_TR_LOC, " \
-          "SUBJECT_TD_LOC," \
-          "CONTENT_TR_LOC," \
-          "CONTENT_TD_LOC," \
-          "LIST_CNT," \
+          "SUBJECT_KEYWORD, " \
+          "LIST_CNT_XPATH," \
           "IF(LAST_COLCT_DE = '', '00000000', LAST_COLCT_DE) AS LAST_COLCT_DE," \
           "CREAT_PNTTM " \
-      "FROM kjcrawler_web_trget"
+      "FROM kjcrawler_web_trget " \
+      "ORDER BY COLCT_TRGET_ID"
 
 # CURSOR에 쿼리 적재
 curs.execute("set names utf8")
@@ -52,73 +51,127 @@ return_query = curs.fetchall()
 
 # 반복문으로 row별로 출력
 for row in return_query:
-    # 결과 값을 해당 변수에 저장
+    # 결과 값을 해당 변수에 저장 (조회결과변수)
     v_colct_trget_id = row['COLCT_TRGET_ID'] # 수집대상ID
     v_colct_instt_nm = row['COLCT_INSTT_NM'] # 수집기관명
     v_colct_bbs_nm = row['COLCT_BBS_NM'] # 수집게시판명
     v_colct_bbs_adres = row['COLCT_BBS_ADRES'] # 수집게시판주소
-    v_subject_xpath = row['SUBJECT_XPATH'] # 제목XPATH
+    v_list_subject_xpath = row['LIST_SUBJECT_XPATH'] # 목록제목XPATH
+    v_detail_subject_xpath = row['DETAIL_SUBJECT_XPATH'] # 상세제목XPATH
     v_content_xpath = row['CONTENT_XPATH'] # 내용XPATH
     v_regist_de_xpath = row['REGIST_DE_XPATH'] # 등록일자XPATH
-    v_subject_tr_loc = row['SUBJECT_TR_LOC'] # 제목행위치
-    v_subject_td_loc = row['SUBJECT_TD_LOC'] # 제목열위치
-    v_content_tr_loc = row['CONTENT_TR_LOC'] # 내용행위치
-    v_content_td_loc = row['CONTENT_TD_LOC'] # 내용열위치
-    v_list_cnt = row['LIST_CNT']  # 게시물갯수
+    v_list_cnt_xpath = row['LIST_CNT_XPATH']  # 게시물갯수XPATH
+    v_subject_keyword = row['SUBJECT_KEYWORD'] # 제목키워드
     v_last_colct_de = row['LAST_COLCT_DE'] # 최종등록일자
     v_creat_pnttm = row['CREAT_PNTTM'] # 등록일자
-    v_bbs_link_url = '' # 게시물 링크 URL
 
-    for list_cnt in range(int(v_subject_tr_loc), int(v_list_cnt)+1, 1):
-        # DB에서 가져온 XPATH 값을 게시물 수 만큼 동적 변경
-        v_trans_subject_xpath = v_subject_xpath.replace("trn", str(list_cnt)).replace("tdn", v_subject_td_loc)
+    # 데이터 처리용 변수
+    v_list_cnt = ''
+    v_prefix_subject = '' # 제목 접두사
+    v_suffix_subject = '' # 제목 접미사
+    v_keyword_index = '' # 키워드 인덱스
+    v_slash_index = '' # 제목 접미사 / 인덱스
+    v_trans_subject_xpath = '' # 변환 제목XPATH
 
-        # chromedriver 2초 대기
-        driver.implicitly_wait(1)
+    # 크롤링 데이터 변수
+    v_bbs_link_url = ''  # 게시물 링크 URL
+    v_reg_de = '' # 등록일자
+    v_subject = '' # 제목
+    v_content = '' # 내용
 
+
+    # 수집대상 게시판 목록 url 대입하여 driver 오픈
+    driver.get(v_colct_bbs_adres)
+
+    # chromedriver 2초 대기
+    driver.implicitly_wait(2)
+
+    # 게시물 갯수 조회
+    v_list_cnt = len(driver.find_elements_by_xpath(v_list_cnt_xpath))
+
+    # 목록제목 XPATH의 반복지점의 인덱스를 키워드로 추출
+    v_keyword_index = v_list_subject_xpath.find(v_subject_keyword)
+
+    # 목록제목 XPATH의 prefix를 추출
+    v_prefix_subject = v_list_subject_xpath[:v_keyword_index]
+
+    # 제목 접미사의 / 인덱스 추출
+    v_slash_index = v_list_subject_xpath[v_keyword_index:].find('/')
+
+    # 목록제목 XPATH의 suffix 추출 (키워드 인덱스와 접미사의 / 인덱스를 추출하여 더한 값으로 suffix 분리
+    v_suffix_subject = v_list_subject_xpath[v_keyword_index + v_slash_index:]
+
+    # 대상 게시판의 최근게시물 조회
+    sql = '''SELECT COLCT_DATA_SUBJECT, COLCT_DATA_REGIST_DE  ''' \
+            '''FROM KJCRAWLER_WEB_DATA ''' \
+            '''WHERE COLCT_TRGET_ID = %s ''' \
+            '''ORDER BY CREAT_PNTTM DESC'''
+
+    # CURSOR에 쿼리 적재
+    curs.execute("set names utf8")
+    curs.execute(sql, (v_colct_trget_id))
+
+    # 최근 게시물 1개만 가져옴
+    result = curs.fetchone()
+
+    # 게시물 목록 수 만큼 반복문 실행
+    for cnt in range(1, v_list_cnt+1):
         # 수집대상 게시판 목록 url 대입하여 driver 오픈
         driver.get(v_colct_bbs_adres)
 
-        # 제목 추출하여 변수에 담음
-        v_crawling_subject = driver.find_element_by_xpath(v_trans_subject_xpath).text
+        # chromedriver 2초 대기
+        driver.implicitly_wait(2)
+
+        # 등록일자 추출
+        v_reg_de = driver.find_element_by_xpath(v_regist_de_xpath.replace("tr[1]", v_subject_keyword + '[' + str(cnt) + ']')).text.replace('-', '').replace('/', '').replace('.', '')
+
+        # 제목 XPATH 동적 변환
+        v_trans_subject_xpath = v_prefix_subject + v_subject_keyword + '[' + str(cnt) + ']' + v_suffix_subject
 
         # 상세페이지 이동
         driver.find_element_by_xpath(v_trans_subject_xpath).click()
 
-        # 등록일자 추출하여 변수에 담음
-        v_crawling_regist_de = driver.find_element_by_xpath(v_regist_de_xpath).text.replace("-", "").replace("/", "")
+        # 현재 게시물의 주소를 변수에 담음
+        v_bbs_link_url = driver.current_url
 
-        # 수집하려는 데이터의 등록일자가 최종수집일자와 같거나 더 클 경우에만 수집하기 위함.
-        if v_crawling_regist_de >= v_last_colct_de:
+        # 제목 추출
+        v_subject = driver.find_element_by_xpath(v_detail_subject_xpath)
 
-            # 현재 게시물의 주소를 변수에 담음
-            v_colct_link_adres = driver.current_url
-
-            # 내용xpath 변수 및 내용 변수 선언
-            v_crawling_content = ""
-            v_trans_content_xpath = ""
-
-            # 내용 추출하여 변수에 담음 (td 값 존재에 따라 xpath가 달라지므로 if문 사용)
-            if v_content_td_loc == 'X':
-                v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc)
-                v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
-            else:
-                v_trans_content_xpath = v_content_xpath.replace("trn", v_content_tr_loc).replace("tdn", v_content_td_loc)
-                v_crawling_content = driver.find_element_by_xpath(v_trans_content_xpath).text
-
+        # 최근게시물 조회 결과가 없을 경우 반복문 진행
+        if (result == None):
+            # 내용 추출
+            v_content = driver.find_element_by_xpath(v_content_xpath)
+            print(v_reg_de)
             # 수집데이터 테이블에 데이터 INSERT
             curs.execute('INSERT INTO kjcrawler_web_data (COLCT_TRGET_ID, COLCT_DATA_SUBJECT, COLCT_DATA_CONTENT, '
-                         'COLCT_LINK_ADRES, COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, %s, now())', (v_colct_trget_id,
-                                                                                               v_crawling_subject,
-                                                                                               v_crawling_content,
-                                                                                               v_colct_link_adres,
-                                                                                               v_crawling_regist_de))
+                         'COLCT_LINK_ADRES, COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, %s, now())',
+                         (v_colct_trget_id,
+                          v_subject,
+                          v_content,
+                          v_bbs_link_url,
+                          v_reg_de))
 
-            # 대상정보 테이블에 최종수집일자 업데이트
+            #대상정보 테이블에 최종수집일자 업데이트
             curs.execute('UPDATE kjcrawler_web_trget SET LAST_COLCT_DE = %s WHERE COLCT_TRGET_ID = %s', (v_today, v_colct_trget_id))
+        else:
+            if(result['COLCT_DATA_SUBJECT'] != c_subject):
+                # 내용 추출
+                v_content = driver.find_element_by_xpath(v_content_xpath)
 
-            conn.commit()
+                # 수집데이터 테이블에 데이터 INSERT
+                curs.execute('INSERT INTO kjcrawler_web_data (COLCT_TRGET_ID, COLCT_DATA_SUBJECT, COLCT_DATA_CONTENT, '
+                             'COLCT_LINK_ADRES, COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, %s, now())',
+                             (v_colct_trget_id,
+                              v_subject,
+                              v_content,
+                              v_bbs_link_url,
+                              v_reg_de))
 
-            print("제목 : " + v_crawling_subject + ", 등록일자 : " + v_crawling_regist_de + ", 내용 : " + v_crawling_content + ", 링크주소 : " + v_colct_link_adres)
+                # 대상정보 테이블에 최종수집일자 업데이트
+                curs.execute('UPDATE kjcrawler_web_trget SET LAST_COLCT_DE = %s WHERE COLCT_TRGET_ID = %s', (v_today, v_colct_trget_id))
+            else:
+                break
+
+        conn.commit()
 
 driver.quit()
