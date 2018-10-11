@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 import pymysql
 from datetime import datetime
+from selenium.common.exceptions import NoSuchElementException
 
 # 현재날짜구해서 변수에 대입 YYYYmmdd 형태의 시간 출력
 v_today = datetime.today().strftime("%Y%m%d")
@@ -36,6 +37,7 @@ sql = "SELECT " \
           "CONTENT_XPATH, " \
           "REGIST_DE_XPATH, " \
           "SUBJECT_KEYWORD, " \
+          "REGIST_DE_KEYWORD, " \
           "LIST_CNT_XPATH," \
           "IF(LAST_COLCT_DE = '', '00000000', LAST_COLCT_DE) AS LAST_COLCT_DE," \
           "CREAT_PNTTM " \
@@ -62,23 +64,26 @@ for row in return_query:
     v_regist_de_xpath = row['REGIST_DE_XPATH'] # 등록일자XPATH
     v_list_cnt_xpath = row['LIST_CNT_XPATH']  # 게시물갯수XPATH
     v_subject_keyword = row['SUBJECT_KEYWORD'] # 제목키워드
+    v_regist_de_keyword = row['REGIST_DE_KEYWORD'] # 등록일자키워드
     v_last_colct_de = row['LAST_COLCT_DE'] # 최종등록일자
     v_creat_pnttm = row['CREAT_PNTTM'] # 등록일자
 
-    # 데이터 처리용 변수
-    v_list_cnt = ''
-    v_prefix_subject = '' # 제목 접두사
-    v_suffix_subject = '' # 제목 접미사
-    v_keyword_index = '' # 키워드 인덱스
-    v_slash_index = '' # 제목 접미사 / 인덱스
-    v_trans_subject_xpath = '' # 변환 제목XPATH
+    # 프로그램 내부 사용 변수
+    p_subject_keyword_loc = v_list_subject_xpath.find(v_subject_keyword) # 목록 키워드 위치
+    p_prefix_subject = v_list_subject_xpath[:p_subject_keyword_loc] # 목록 제목 접두사
+    p_suffix_subject = v_list_subject_xpath[p_subject_keyword_loc:][v_list_subject_xpath[p_subject_keyword_loc:].find('/'):] #목록 제목 접미사
+    p_subject_start_no = v_list_subject_xpath[p_subject_keyword_loc:][v_list_subject_xpath[p_subject_keyword_loc:].find('[')+1:v_list_subject_xpath[p_subject_keyword_loc:].find(']')] # 반복 시작 번호
+    p_loop_subject = '' # 반복 제목 XPATH 생성 변수
+    
+    p_regist_loc = v_regist_de_xpath.find(v_regist_de_keyword) # 등록일자 키워드 위치
+    p_prefix_regist_de = v_regist_de_xpath[:p_regist_loc] # 목록 등록일자 접두사
+    p_suffix_regist_de = v_regist_de_xpath[p_regist_loc:][v_regist_de_xpath[p_regist_loc:].find('/'):] # 목록 등록일자 접미사
+    p_loop_regist_de = '' # 반복 등록일자 XPATH 생성 변수
 
-    # 크롤링 데이터 변수
-    v_bbs_link_url = ''  # 게시물 링크 URL
-    v_reg_de = '' # 등록일자
-    v_subject = '' # 제목
-    v_content = '' # 내용
-
+    # 수집데이터 변수
+    c_regist_de = '' # 등록일자
+    c_subject = '' # 상세 제목
+    c_content = '' # 상세 내용
 
     # 수집대상 게시판 목록 url 대입하여 driver 오픈
     driver.get(v_colct_bbs_adres)
@@ -89,88 +94,71 @@ for row in return_query:
     # 게시물 갯수 조회
     v_list_cnt = len(driver.find_elements_by_xpath(v_list_cnt_xpath))
 
-    # 목록제목 XPATH의 반복지점의 인덱스를 키워드로 추출
-    v_keyword_index = v_list_subject_xpath.find(v_subject_keyword)
-
-    # 목록제목 XPATH의 prefix를 추출
-    v_prefix_subject = v_list_subject_xpath[:v_keyword_index]
-
-    # 제목 접미사의 / 인덱스 추출
-    v_slash_index = v_list_subject_xpath[v_keyword_index:].find('/')
-
-    # 목록제목 XPATH의 suffix 추출 (키워드 인덱스와 접미사의 / 인덱스를 추출하여 더한 값으로 suffix 분리
-    v_suffix_subject = v_list_subject_xpath[v_keyword_index + v_slash_index:]
-
     # 대상 게시판의 최근게시물 조회
-    sql = '''SELECT COLCT_DATA_SUBJECT, COLCT_DATA_REGIST_DE  ''' \
+    sql = '''SELECT COLCT_DATA_SUBJECT ''' \
             '''FROM KJCRAWLER_WEB_DATA ''' \
             '''WHERE COLCT_TRGET_ID = %s ''' \
-            '''ORDER BY CREAT_PNTTM DESC'''
+            '''ORDER BY CREAT_PNTTM DESC ''' \
+            '''LIMIT %s'''
 
     # CURSOR에 쿼리 적재
-    curs.execute("set names utf8")
-    curs.execute(sql, (v_colct_trget_id))
+    curs.execute(sql, (v_colct_trget_id, v_list_cnt))
 
-    # 최근 게시물 1개만 가져옴
-    result = curs.fetchone()
+    # 최신 등록된 데이터를 게시물 개수만큼 가져옴
+    result = curs.fetchall()
 
     # 게시물 목록 수 만큼 반복문 실행
-    for cnt in range(1, v_list_cnt+1):
+    for cnt in range(int(p_subject_start_no), v_list_cnt+1):
         # 수집대상 게시판 목록 url 대입하여 driver 오픈
         driver.get(v_colct_bbs_adres)
 
-        # chromedriver 2초 대기
-        driver.implicitly_wait(2)
+        # chromedriver 1초 대기
+        driver.implicitly_wait(1)
 
-        # 등록일자 추출
-        v_reg_de = driver.find_element_by_xpath(v_regist_de_xpath.replace("tr[1]", v_subject_keyword + '[' + str(cnt) + ']')).text.replace('-', '').replace('/', '').replace('.', '')
+        # 등록일자 동적 XPATH 생성
+        p_loop_regist_de = p_prefix_regist_de + v_regist_de_keyword + '[' + str(cnt) + ']' + p_suffix_regist_de
 
-        # 제목 XPATH 동적 변환
-        v_trans_subject_xpath = v_prefix_subject + v_subject_keyword + '[' + str(cnt) + ']' + v_suffix_subject
+        # 제목 동적XPATH 생성
+        p_loop_subject = p_prefix_subject + v_subject_keyword + '[' + str(cnt) + ']' + p_suffix_subject
 
-        # 상세페이지 이동
-        driver.find_element_by_xpath(v_trans_subject_xpath).click()
+        # 등록일자 추출 (element exception 오류 발생 대비)
+        try:
+            c_regist_de = driver.find_element_by_xpath(p_loop_regist_de).text.replace('-', '').replace('/','').replace('.','')
+
+        except NoSuchElementException:
+            c_regist_de = 'PASS'
+
+        # 제목 클릭하여 상세페이지 이동
+        driver.find_element_by_xpath(p_loop_subject).click()
+
+        # 상세화면 제목 추출
+        c_subject = driver.find_element_by_xpath(v_detail_subject_xpath).text
+
+        # 상세화면 내용 추출
+        c_content = driver.find_element_by_xpath(v_content_xpath).text
 
         # 현재 게시물의 주소를 변수에 담음
-        v_bbs_link_url = driver.current_url
+        c_bbs_link_url = driver.current_url
 
-        # 제목 추출
-        v_subject = driver.find_element_by_xpath(v_detail_subject_xpath)
+        # 목록에서 등록일자 추출 실패 시 상세에서 등록일자 가져옴
+        if (c_regist_de == 'PASS'):
+            c_regist_de = driver.find_element_by_xpath(v_regist_de_xpath).text
 
-        # 최근게시물 조회 결과가 없을 경우 반복문 진행
-        if (result == None):
-            # 내용 추출
-            v_content = driver.find_element_by_xpath(v_content_xpath)
-            print(v_reg_de)
-            # 수집데이터 테이블에 데이터 INSERT
-            curs.execute('INSERT INTO kjcrawler_web_data (COLCT_TRGET_ID, COLCT_DATA_SUBJECT, COLCT_DATA_CONTENT, '
-                         'COLCT_LINK_ADRES, COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, %s, now())',
-                         (v_colct_trget_id,
-                          v_subject,
-                          v_content,
-                          v_bbs_link_url,
-                          v_reg_de))
-
-            #대상정보 테이블에 최종수집일자 업데이트
-            curs.execute('UPDATE kjcrawler_web_trget SET LAST_COLCT_DE = %s WHERE COLCT_TRGET_ID = %s', (v_today, v_colct_trget_id))
+        # 기존 등록된 데이터 존재 유무에 따라 분기처리
+        if(result is None):
+            print('와우')
         else:
-            if(result['COLCT_DATA_SUBJECT'] != c_subject):
-                # 내용 추출
-                v_content = driver.find_element_by_xpath(v_content_xpath)
+            # 조회된 데이터가 있을 경우 배열에 담음
+            for sjcnt in result:
+                print(result[sjcnt])
 
-                # 수집데이터 테이블에 데이터 INSERT
-                curs.execute('INSERT INTO kjcrawler_web_data (COLCT_TRGET_ID, COLCT_DATA_SUBJECT, COLCT_DATA_CONTENT, '
-                             'COLCT_LINK_ADRES, COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, %s, now())',
-                             (v_colct_trget_id,
-                              v_subject,
-                              v_content,
-                              v_bbs_link_url,
-                              v_reg_de))
+        # 등록일자 길이에 따라 날짜 형태가 다르므로 분기하여 처리
+        if (len(c_regist_de) > 8):
+            c_regist_de = c_regist_de[0:9]
+        elif (len(c_regist_de) < 8 or c_regist_de is None):
+            c_regist_de = v_today
 
-                # 대상정보 테이블에 최종수집일자 업데이트
-                curs.execute('UPDATE kjcrawler_web_trget SET LAST_COLCT_DE = %s WHERE COLCT_TRGET_ID = %s', (v_today, v_colct_trget_id))
-            else:
-                break
+
 
         conn.commit()
 
