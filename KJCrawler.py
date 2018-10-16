@@ -5,6 +5,13 @@ from bs4 import BeautifulSoup
 import pymysql
 from datetime import datetime
 from selenium.common.exceptions import NoSuchElementException
+from multiprocessing import Pool # 멀티프로세싱
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+import time
+
+p_start_time = time.time() # 시작시간 저장
 
 # 현재날짜구해서 변수에 대입 YYYYmmdd 형태의 시간 출력
 v_today = datetime.today().strftime("%Y%m%d")
@@ -67,6 +74,7 @@ for row in return_query:
     v_regist_de_keyword = row['REGIST_DE_KEYWORD'] # 등록일자키워드
     v_last_colct_de = row['LAST_COLCT_DE'] # 최종등록일자
     v_creat_pnttm = row['CREAT_PNTTM'] # 등록일자
+    v_list_cnt = '' # 목록갯수
 
     # 프로그램 내부 사용 변수
     p_subject_keyword_loc = v_list_subject_xpath.find(v_subject_keyword) # 목록 키워드 위치
@@ -80,6 +88,9 @@ for row in return_query:
     p_suffix_regist_de = v_regist_de_xpath[p_regist_loc:][v_regist_de_xpath[p_regist_loc:].find('/'):] # 목록 등록일자 접미사
     p_loop_regist_de = '' # 반복 등록일자 XPATH 생성 변수
 
+    p_subject_arr = [] # 최신등록된 게시물 조회 배열
+    p_dupl_flag = 'N' # 데이터 중복 플래그
+
     # 수집데이터 변수
     c_regist_de = '' # 등록일자
     c_subject = '' # 상세 제목
@@ -88,12 +99,17 @@ for row in return_query:
     # 수집대상 게시판 목록 url 대입하여 driver 오픈
     driver.get(v_colct_bbs_adres)
 
-    # chromedriver 2초 대기
-    driver.implicitly_wait(2)
+    # 크롬드라이버 2초대기
+    driver.implicitly_wait(1)
 
-    # 게시물 갯수 조회
+    # 게시물 갯수 조회 
     v_list_cnt = len(driver.find_elements_by_xpath(v_list_cnt_xpath))
-
+    
+    # 게시물 갯수가 0일 경우 기본 10으로 세팅
+    if(v_list_cnt == 0):
+        v_list_cnt = 10
+    
+    print('수집기관명 : ' + v_colct_instt_nm + ', 게시물 갯수 : ' + str(v_list_cnt))
     # 대상 게시판의 최근게시물 조회
     sql = '''SELECT COLCT_DATA_SUBJECT ''' \
             '''FROM KJCRAWLER_WEB_DATA ''' \
@@ -107,12 +123,17 @@ for row in return_query:
     # 최신 등록된 데이터를 게시물 개수만큼 가져옴
     result = curs.fetchall()
 
+    # 조회된 데이터가 있을 경우 배열에 담음
+    if(len(result) > 0):
+        for sjdict in range(0, v_list_cnt):
+            p_subject_arr.insert(sjdict, result[sjdict]['COLCT_DATA_SUBJECT'])
+    
     # 게시물 목록 수 만큼 반복문 실행
     for cnt in range(int(p_subject_start_no), v_list_cnt+1):
         # 수집대상 게시판 목록 url 대입하여 driver 오픈
         driver.get(v_colct_bbs_adres)
 
-        # chromedriver 1초 대기
+        # 크롬드라이버 2초대기
         driver.implicitly_wait(1)
 
         # 등록일자 동적 XPATH 생성
@@ -129,13 +150,21 @@ for row in return_query:
             c_regist_de = 'PASS'
 
         # 제목 클릭하여 상세페이지 이동
-        driver.find_element_by_xpath(p_loop_subject).click()
+        if(v_colct_trget_id != 4):
+            driver.find_element_by_xpath(p_loop_subject).click()
+        else:
+            element = driver.find_element_by_xpath(p_loop_subject)
+            element.submit()
 
         # 상세화면 제목 추출
         c_subject = driver.find_element_by_xpath(v_detail_subject_xpath).text
-
-        # 상세화면 내용 추출
-        c_content = driver.find_element_by_xpath(v_content_xpath).text
+        print(c_subject)
+        # 게시판 형식 중 첨부파일이 있을 경우 상세 내용보다 위에 위치할 경우 class 값으로 가져옴
+        if(v_colct_trget_id == 1): # 부천시청(1)일 경우
+            c_content = driver.find_element_by_class_name(v_content_xpath).text
+        else:
+            # 상세화면 내용 추출
+            c_content = driver.find_element_by_xpath(v_content_xpath).text
 
         # 현재 게시물의 주소를 변수에 담음
         c_bbs_link_url = driver.current_url
@@ -144,21 +173,35 @@ for row in return_query:
         if (c_regist_de == 'PASS'):
             c_regist_de = driver.find_element_by_xpath(v_regist_de_xpath).text
 
-        # 기존 등록된 데이터 존재 유무에 따라 분기처리
-        if(result is None):
-            print('와우')
-        else:
-            # 조회된 데이터가 있을 경우 배열에 담음
-            for sjcnt in result:
-                print(result[sjcnt])
-
         # 등록일자 길이에 따라 날짜 형태가 다르므로 분기하여 처리
         if (len(c_regist_de) > 8):
             c_regist_de = c_regist_de[0:9]
         elif (len(c_regist_de) < 8 or c_regist_de is None):
             c_regist_de = v_today
 
+        # 기존 등록된 데이터 존재 유무에 따라 분기처리
+        if(len(result) == 0):
+            p_dupl_flag = 'N'
+        else:
+            # 조회된 데이터가 있을 경우 배열값과 추출한 제목 비교
+            for sjlist in range(0, v_list_cnt):
+                if(p_subject_arr[sjlist] == c_subject):
+                    p_dupl_flag = 'Y'
 
+        # 중복값이 존재하지 않을 경우 데이터 처리
+        if(p_dupl_flag == 'N'):
+            # 데이터 테이블 INSERT
+            curs.execute('INSERT INTO kjcrawler_web_data (COLCT_TRGET_ID, COLCT_DATA_SUBJECT, COLCT_DATA_CONTENT, '
+                         'COLCT_LINK_ADRES, COLCT_DATA_REGIST_DE, CREAT_PNTTM) VALUES (%s, %s, %s, %s, %s, now())',
+                         (v_colct_trget_id,
+                          c_subject,
+                          c_content,
+                          c_bbs_link_url,
+                          c_regist_de))
+
+            # 대상 테이블 UPDATE
+            curs.execute('UPDATE kjcrawler_web_trget SET LAST_COLCT_DE = %s WHERE COLCT_TRGET_ID = %s',
+                         (v_today, v_colct_trget_id))
 
         conn.commit()
 
