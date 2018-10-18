@@ -104,7 +104,7 @@ for row in return_query:
 
     # 게시물 갯수 조회 
     v_list_cnt = len(driver.find_elements_by_xpath(v_list_cnt_xpath))
-    
+
     # 게시물 갯수가 0일 경우 기본 10으로 세팅
     if(v_list_cnt == 0):
         v_list_cnt = 10
@@ -150,11 +150,11 @@ for row in return_query:
             c_regist_de = 'PASS'
 
         # 제목 클릭하여 상세페이지 이동
-        if(v_colct_trget_id != 4):
-            driver.find_element_by_xpath(p_loop_subject).click()
-        else:
-            element = driver.find_element_by_xpath(p_loop_subject)
-            element.submit()
+        #if(v_colct_trget_id != 4):
+        driver.find_element_by_xpath(p_loop_subject).click()
+        #else:
+        #    element = driver.find_element_by_xpath(p_loop_subject)
+        #    element.submit()
 
         # 상세화면 제목 추출
         c_subject = driver.find_element_by_xpath(v_detail_subject_xpath).text
