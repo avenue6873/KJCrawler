@@ -9,6 +9,7 @@ from multiprocessing import Pool # 멀티프로세싱
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 import time
 
 p_start_time = time.time() # 시작시간 저장
@@ -77,15 +78,13 @@ for row in return_query:
     v_list_cnt = '' # 목록갯수
 
     # 프로그램 내부 사용 변수
-    p_subject_keyword_loc = v_list_subject_xpath.find(v_subject_keyword) # 목록 키워드 위치
-    p_prefix_subject = v_list_subject_xpath[:p_subject_keyword_loc] # 목록 제목 접두사
-    p_suffix_subject = v_list_subject_xpath[p_subject_keyword_loc:][v_list_subject_xpath[p_subject_keyword_loc:].find('/'):] #목록 제목 접미사
-    p_subject_start_no = v_list_subject_xpath[p_subject_keyword_loc:][v_list_subject_xpath[p_subject_keyword_loc:].find('[')+1:v_list_subject_xpath[p_subject_keyword_loc:].find(']')] # 반복 시작 번호
+    p_prefix_subject = v_subject_keyword # 목록 제목 접두사
+    p_suffix_subject = v_list_subject_xpath.replace(v_subject_keyword, "")[1:] #목록 제목 접미사
+    p_subject_start_no = v_list_subject_xpath.replace(v_subject_keyword, "")[0:1]# 반복 시작 번호
     p_loop_subject = '' # 반복 제목 XPATH 생성 변수
-    
-    p_regist_loc = v_regist_de_xpath.find(v_regist_de_keyword) # 등록일자 키워드 위치
-    p_prefix_regist_de = v_regist_de_xpath[:p_regist_loc] # 목록 등록일자 접두사
-    p_suffix_regist_de = v_regist_de_xpath[p_regist_loc:][v_regist_de_xpath[p_regist_loc:].find('/'):] # 목록 등록일자 접미사
+
+    p_prefix_regist_de = v_regist_de_keyword # 목록 등록일자 접두사
+    p_suffix_regist_de = v_regist_de_xpath.replace(v_regist_de_keyword, "")[1:] # 목록 등록일자 접미사
     p_loop_regist_de = '' # 반복 등록일자 XPATH 생성 변수
 
     p_subject_arr = [] # 최신등록된 게시물 조회 배열
@@ -102,13 +101,13 @@ for row in return_query:
     # 크롬드라이버 2초대기
     driver.implicitly_wait(1)
 
-    # 게시물 갯수 조회 
+    # 게시물 갯수 조회
     v_list_cnt = len(driver.find_elements_by_xpath(v_list_cnt_xpath))
 
     # 게시물 갯수가 0일 경우 기본 10으로 세팅
     if(v_list_cnt == 0):
         v_list_cnt = 10
-    
+
     print('수집기관명 : ' + v_colct_instt_nm + ', 게시물 갯수 : ' + str(v_list_cnt))
     # 대상 게시판의 최근게시물 조회
     sql = '''SELECT COLCT_DATA_SUBJECT ''' \
@@ -125,11 +124,14 @@ for row in return_query:
 
     # 조회된 데이터가 있을 경우 배열에 담음
     if(len(result) > 0):
-        for sjdict in range(0, v_list_cnt):
+        for sjdict in range(0, len(result)):
             p_subject_arr.insert(sjdict, result[sjdict]['COLCT_DATA_SUBJECT'])
-    
+
     # 게시물 목록 수 만큼 반복문 실행
     for cnt in range(int(p_subject_start_no), v_list_cnt+1):
+        # 중복여부 플래그 초기화
+        p_dupl_flag = 'N'
+
         # 수집대상 게시판 목록 url 대입하여 driver 오픈
         driver.get(v_colct_bbs_adres)
 
@@ -137,10 +139,10 @@ for row in return_query:
         driver.implicitly_wait(1)
 
         # 등록일자 동적 XPATH 생성
-        p_loop_regist_de = p_prefix_regist_de + v_regist_de_keyword + '[' + str(cnt) + ']' + p_suffix_regist_de
+        p_loop_regist_de = p_prefix_regist_de + str(cnt) + p_suffix_regist_de
 
         # 제목 동적XPATH 생성
-        p_loop_subject = p_prefix_subject + v_subject_keyword + '[' + str(cnt) + ']' + p_suffix_subject
+        p_loop_subject = p_prefix_subject + str(cnt) + p_suffix_subject
 
         # 등록일자 추출 (element exception 오류 발생 대비)
         try:
@@ -149,12 +151,14 @@ for row in return_query:
         except NoSuchElementException:
             c_regist_de = 'PASS'
 
-        # 제목 클릭하여 상세페이지 이동
-        #if(v_colct_trget_id != 4):
-        driver.find_element_by_xpath(p_loop_subject).click()
-        #else:
-        #    element = driver.find_element_by_xpath(p_loop_subject)
-        #    element.submit()
+        # 제목 클릭하여 상세페이지 이동 (href에 링크가 있는 경우 일반 클릭, 자바스크립트로 이동하는 경우 키 엔터 처리)
+        if(v_colct_trget_id != 7):
+            driver.find_element_by_xpath(p_loop_subject).click()
+        else:
+            try:
+                driver.find_element_by_xpath(p_loop_subject).send_keys(Keys.ENTER)
+            except NoSuchElementException:
+                break
 
         # 상세화면 제목 추출
         c_subject = driver.find_element_by_xpath(v_detail_subject_xpath).text
@@ -184,10 +188,10 @@ for row in return_query:
             p_dupl_flag = 'N'
         else:
             # 조회된 데이터가 있을 경우 배열값과 추출한 제목 비교
-            for sjlist in range(0, v_list_cnt):
+            for sjlist in range(0, len(result)):
                 if(p_subject_arr[sjlist] == c_subject):
                     p_dupl_flag = 'Y'
-
+        print(p_dupl_flag)
         # 중복값이 존재하지 않을 경우 데이터 처리
         if(p_dupl_flag == 'N'):
             # 데이터 테이블 INSERT
@@ -203,6 +207,6 @@ for row in return_query:
             curs.execute('UPDATE kjcrawler_web_trget SET LAST_COLCT_DE = %s WHERE COLCT_TRGET_ID = %s',
                          (v_today, v_colct_trget_id))
 
-        conn.commit()
+            conn.commit()
 
 driver.quit()
